@@ -37,6 +37,7 @@
  *   getSVG(size, opt_type) : return a string of generated SVG image.
  *                                    result_image_size = original_image_size * size
  *                                    optional parameter opt_type can be "curve"
+ *                                    or "pathData" (get d attribute of a generated path element)
  */
 
 var Potrace = (function () {
@@ -172,20 +173,34 @@ var Potrace = (function () {
 		ctx.drawImage(imgElement, 0, 0);
 	}
 
-	function loadBm() {
-		var ctx = imgCanvas.getContext("2d");
-		bm = new Bitmap(imgCanvas.width, imgCanvas.height);
-		var imgdataobj = ctx.getImageData(0, 0, bm.w, bm.h);
-		var l = imgdataobj.data.length,
+	function setImageData(data,width,height){
+		if (info.isReady) {
+			clear();
+		}
+		loadBm(data,width,height);
+	}
+
+	function loadBm(imgData , width , height) {
+		info.isReady = false;
+		if ( imgData && width && height){
+			bm = new Bitmap(width, height);
+		} else {
+			var ctx = imgCanvas.getContext("2d");
+			bm = new Bitmap(imgCanvas.width, imgCanvas.height);
+			var imgdataobj = ctx.getImageData(0, 0, bm.w, bm.h);
+			imgData = imgdataobj.data;
+		}
+		
+		var l = imgData.length,
 			i,
 			j,
 			color;
 		for (i = 0, j = 0; i < l; i += 4, j++) {
 			color = info.binarizer(
-				imgdataobj.data[i],
-				imgdataobj.data[i + 1],
-				imgdataobj.data[i + 2],
-				imgdataobj.data[i + 3]
+				imgData[i],
+				imgData[i + 1],
+				imgData[i + 2],
+				imgData[i + 3]
 			);
 			bm.data[j] = color < 128 ? 1 : 0;
 		}
@@ -1437,35 +1452,49 @@ var Potrace = (function () {
 			strokec,
 			fillc,
 			fillrule;
-
-		var svg =
-			'<svg id="svg" version="1.1" width="' +
-			w +
-			'" height="' +
-			h +
-			'" xmlns="http://www.w3.org/2000/svg">';
-		svg += '<path d="';
-		for (i = 0; i < len; i++) {
-			c = pathlist[i].curve;
-			svg += path(c);
-		}
-		if (opt_type === "curve") {
-			strokec = "black";
-			fillc = "none";
-			fillrule = "";
+		
+		if (opt_type === "pathData") {
+			var data="";
+			for (i = 0; i < len; i++) {
+				c = pathlist[i].curve;
+				data += path(c);
+			}
+			return{
+				width:w,
+				height:h,
+				data
+			}
 		} else {
-			strokec = "none";
-			fillc = "black";
-			fillrule = ' fill-rule="evenodd"';
+			var svg =
+				'<svg id="svg" version="1.1" width="' +
+				w +
+				'" height="' +
+				h +
+				'" xmlns="http://www.w3.org/2000/svg">';
+			svg += '<path d="';
+			for (i = 0; i < len; i++) {
+				c = pathlist[i].curve;
+				svg += path(c);
+			}
+			if (opt_type === "curve") {
+				strokec = "black";
+				fillc = "none";
+				fillrule = "";
+			} else {
+				strokec = "none";
+				fillc = "black";
+				fillrule = ' fill-rule="evenodd"';
+			}
+			svg +=
+				'" stroke="' + strokec + '" fill="' + fillc + '"' + fillrule + "/></svg>";
+			return svg;
 		}
-		svg +=
-			'" stroke="' + strokec + '" fill="' + fillc + '"' + fillrule + "/></svg>";
-		return svg;
 	}
 
 	return {
 		loadImageFromFile: loadImageFromFile,
 		loadImageFromUrl: loadImageFromUrl,
+		setImageData: setImageData,
 		setParameter: setParameter,
 		process: process,
 		getSVG: getSVG,
