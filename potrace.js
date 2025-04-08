@@ -2,6 +2,9 @@
  *
  * A javascript port of Potrace (http://potrace.sourceforge.net).
  *
+ * History
+ *  2024/10/21 add binarizer option
+ *  2024/11/22 add setImageData interface
  * Licensed under the GPL
  *
  * Usage
@@ -23,6 +26,10 @@
  *          corner threshold parameter (default: 1)
  *        opttolerance
  *          curve optimization tolerance (default: 0.2)
+ *        binarizer
+ *          you can set custom binarize function 
+ *          function(r, g, b, a) < 128 should be painted pix
+ *          (defaulet: 0.2126 * r + 0.7153 * g + 0.0721 * b)
  *
  *   process(callback) : wait for the image be loaded, then run potrace algorithm,
  *                       then call callback function.
@@ -30,6 +37,9 @@
  *   getSVG(size, opt_type) : return a string of generated SVG image.
  *                                    result_image_size = original_image_size * size
  *                                    optional parameter opt_type can be "curve"
+ *                                    or "pathData" (get d attribute of a generated path element)
+ *
+ * Guidebook: https://potrace.sourceforge.net/potracelib.pdf
  */
 
 var Potrace = (function () {
@@ -118,6 +128,9 @@ var Potrace = (function () {
 			optcurve: true,
 			alphamax: 1,
 			opttolerance: 0.2,
+			binarizer: function (r, g, b, a) {
+				return 0.2126 * r + 0.7153 * g + 0.0721 * b;
+			},
 		};
 
 	imgElement.onload = function () {
@@ -162,19 +175,35 @@ var Potrace = (function () {
 		ctx.drawImage(imgElement, 0, 0);
 	}
 
-	function loadBm() {
-		var ctx = imgCanvas.getContext("2d");
-		bm = new Bitmap(imgCanvas.width, imgCanvas.height);
-		var imgdataobj = ctx.getImageData(0, 0, bm.w, bm.h);
-		var l = imgdataobj.data.length,
+	function setImageData(data,width,height){
+		if (info.isReady) {
+			clear();
+		}
+		loadBm(data,width,height);
+	}
+
+	function loadBm(imgData , width , height) {
+		info.isReady = false;
+		if ( imgData && width && height){
+			bm = new Bitmap(width, height);
+		} else {
+			var ctx = imgCanvas.getContext("2d");
+			bm = new Bitmap(imgCanvas.width, imgCanvas.height);
+			var imgdataobj = ctx.getImageData(0, 0, bm.w, bm.h);
+			imgData = imgdataobj.data;
+		}
+		
+		var l = imgData.length,
 			i,
 			j,
 			color;
 		for (i = 0, j = 0; i < l; i += 4, j++) {
-			color =
-				0.2126 * imgdataobj.data[i] +
-				0.7153 * imgdataobj.data[i + 1] +
-				0.0721 * imgdataobj.data[i + 2];
+			color = info.binarizer(
+				imgData[i],
+				imgData[i + 1],
+				imgData[i + 2],
+				imgData[i + 3]
+			);
 			bm.data[j] = color < 128 ? 1 : 0;
 		}
 		info.isReady = true;
@@ -1425,35 +1454,49 @@ var Potrace = (function () {
 			strokec,
 			fillc,
 			fillrule;
-
-		var svg =
-			'<svg id="svg" version="1.1" width="' +
-			w +
-			'" height="' +
-			h +
-			'" xmlns="http://www.w3.org/2000/svg">';
-		svg += '<path d="';
-		for (i = 0; i < len; i++) {
-			c = pathlist[i].curve;
-			svg += path(c);
-		}
-		if (opt_type === "curve") {
-			strokec = "black";
-			fillc = "none";
-			fillrule = "";
+		
+		if (opt_type === "pathData") {
+			var data="";
+			for (i = 0; i < len; i++) {
+				c = pathlist[i].curve;
+				data += path(c);
+			}
+			return{
+				width:w,
+				height:h,
+				data
+			}
 		} else {
-			strokec = "none";
-			fillc = "black";
-			fillrule = ' fill-rule="evenodd"';
+			var svg =
+				'<svg id="svg" version="1.1" width="' +
+				w +
+				'" height="' +
+				h +
+				'" xmlns="http://www.w3.org/2000/svg">';
+			svg += '<path d="';
+			for (i = 0; i < len; i++) {
+				c = pathlist[i].curve;
+				svg += path(c);
+			}
+			if (opt_type === "curve") {
+				strokec = "black";
+				fillc = "none";
+				fillrule = "";
+			} else {
+				strokec = "none";
+				fillc = "black";
+				fillrule = ' fill-rule="evenodd"';
+			}
+			svg +=
+				'" stroke="' + strokec + '" fill="' + fillc + '"' + fillrule + "/></svg>";
+			return svg;
 		}
-		svg +=
-			'" stroke="' + strokec + '" fill="' + fillc + '"' + fillrule + "/></svg>";
-		return svg;
 	}
 
 	return {
 		loadImageFromFile: loadImageFromFile,
 		loadImageFromUrl: loadImageFromUrl,
+		setImageData: setImageData,
 		setParameter: setParameter,
 		process: process,
 		getSVG: getSVG,
